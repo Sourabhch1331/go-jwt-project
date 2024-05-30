@@ -4,7 +4,13 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
+	"github.com/sourabhch1331/go-jwt-project/database"
+	"go.mongodb.org/mongo-driver/mongo"
 )
+
+var userCollection *mongo.Collection = database.OpenCollection(database.Client, "user")
+var validate = validator.New()
 
 func HashPassword() {
 
@@ -42,7 +48,7 @@ func GetUsers(ctx *gin.Context) {
 }
 
 func GetUser(ctx *gin.Context) {
-	userId, _ := ctx.Params.Get("userId")
+	userId := ctx.Param("userId")
 
 	ctx.JSON(http.StatusOK, gin.H{
 		"status":     "success",
