@@ -14,6 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -24,16 +25,91 @@ func HashPassword() {
 
 }
 
-func VerifyPassword() {
-
+func VerifyPassword(hashedPassword string, planPassword string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(planPassword))
+	return err == nil
 }
 
 func Login(ctx *gin.Context) {
+
+	c, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+
+	var user models.User
+	var foundUser models.User
+
+	if err := ctx.BindJSON(&user); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"status":     "fail",
+			"statusCode": http.StatusBadRequest,
+			"message":    err.Error(),
+			"data":       nil,
+		})
+		return
+	}
+
+	if err := userCollection.FindOne(c, bson.M{"email": *user.Email}).Decode(&foundUser); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"status":     "fail",
+			"statusCode": http.StatusBadRequest,
+			"message":    err.Error(),
+			"data":       nil,
+		})
+		return
+	}
+
+	if passwordIsValid := VerifyPassword(*foundUser.Password, *user.Password); !passwordIsValid {
+		ctx.JSON(http.StatusUnauthorized, gin.H{
+			"status":     "fail",
+			"statusCode": http.StatusUnauthorized,
+			"message":    "wrong password!",
+			"data":       nil,
+		})
+		return
+	}
+
+	token, refreshToken, err := helper.GenerateAllTokens(*foundUser.Email, *foundUser.Name, *foundUser.UserType, *foundUser.UserId)
+
+	if err != nil {
+		ctx.JSON(http.StatusUnauthorized, gin.H{
+			"status":     "fail",
+			"statusCode": http.StatusInternalServerError,
+			"message":    err.Error(),
+			"data":       nil,
+		})
+		return
+	}
+
+	foundUser.Token = &token
+	foundUser.RefreshToken = &refreshToken
+
+	var updateObj primitive.D
+
+	updateObj = append(updateObj, bson.E{Key: "token", Value: token})
+	updateObj = append(updateObj, bson.E{Key: "refreshtoken", Value: refreshToken})
+
+	upsert := true
+	opts := options.UpdateOptions{
+		Upsert: &upsert,
+	}
+
+	_, err = userCollection.UpdateOne(c, bson.M{"email": *foundUser.Email}, bson.D{{Key: "$set", Value: updateObj}}, &opts)
+
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"status":     "fail",
+			"statusCode": http.StatusInternalServerError,
+			"message":    err.Error(),
+			"data":       nil,
+		})
+		return
+	}
+
 	ctx.JSON(http.StatusOK, gin.H{
 		"status":     "success",
 		"statusCode": 200,
 		"message":    "user logged in!",
-		"data":       nil,
+		"data":       foundUser,
 	})
 }
 
